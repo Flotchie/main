@@ -42,6 +42,12 @@ struct DATA
    char buffer[28];
 };
 
+enum ReadOneWireState
+{
+   ROWS_Idle,
+   ROWS_WaitConversion,
+};
+
 #define MAX_CHANGES 128
 volatile unsigned int timings[MAX_CHANGES];
 volatile unsigned int changeCount;
@@ -49,5 +55,26 @@ volatile unsigned long lastTime;
 volatile unsigned int nReceivedBitlength;
 volatile char sReceivedBits[64];
 volatile long lastData;
+volatile long lastBlink;
+volatile long lastAlive;
+bool rfOK;
+ReadOneWireState readOneWireState;
+long ReadOneWireNextStateTime;
+uint8_t ReadOneWireAddr[8];
+byte  ReadOneWireType_s;
+
+void incPos( int& pos ) ;
+void addData( const DATA& data ) ;
+bool readData(DATA& data) ;
+void setup() ;
+void loop() ;
+void sendRelayState(char relayId) ;
+void setRelayState(char relayId, char onOff ) ;
+void readOneWire(long ct) ;
+static inline unsigned long diff(long A, long B) ;
+void receiveRFProtocol(unsigned int changeCount) ;
+void rfSignalChange() ;
+void dataRequestFromI2CMaster() ;
+void receiveEventFromI2CMaster(int howMany) ;
 
 #endif /* ARDUPI_H_ */

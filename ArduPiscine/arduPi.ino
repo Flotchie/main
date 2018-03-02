@@ -2,8 +2,8 @@
 #include <Wire.h>
 #include <util/atomic.h>
 #include "OneWire.h"
-
 #include "arduPi.h"
+
 const byte pin02_RFData = 2;  // RF data signal
 const byte pin05_12_relay[] = {5,6,7,8,9,10,11,12};  // relay 1-8 pins
 const byte pin13_led = 13;    // led carte
@@ -12,7 +12,6 @@ int bufferSize = 0;
 
 // interface OneWire
 OneWire  ds(3);  // on pin 3 (a 4.7K resistor is necessary)
-char readOneWireI = 0;
 
 const int nbData = 20;
 DATA datas[nbData];
@@ -65,8 +64,12 @@ void setup()
       pinMode(pin05_12_relay[rel], OUTPUT);
    }
 
-   attachInterrupt(digitalPinToInterrupt(pin02_RFData), rfSignalChange, CHANGE);
+   // gpio2 -> interrupt 0
+   attachInterrupt(0, rfSignalChange, CHANGE);
    lastData = -200001L;
+   rfOK = false;
+   ReadOneWireNextStateTime = 0L;
+   readOneWireState = ROWS_Idle;
    Serial.begin(57600); // start serial for debug traces
    for(char relayId=1;relayId<=8;++relayId)
    {
@@ -79,15 +82,33 @@ void setup()
 void loop()
 {
    long ct = millis();
+   if( (ct-lastAlive)>=5000L)
+   {
+       Serial.print("Alive(");
+       Serial.print(ct, 10);
+       Serial.print(",");       
+       Serial.print(rfOK, 10);
+       Serial.println(")");
+       lastAlive = ct;
+   }         
    if( (ct-lastData)<200000L )
+   {
       // reception dans les 200 dernières secondes : led allumée fixe
       digitalWrite(pin13_led, HIGH);
+      rfOK = true;
+   }
    else
-      // pas de reception dans les 200 dernières secondes : led clignotante
-      digitalWrite(pin13_led, stateLed = (stateLed+1)%2);
-   delay(100);
-   readOneWireI = (readOneWireI+1)%100; // toutes les 10s on lit le OneWire
-   if(readOneWireI==0) readOneWire();
+   {
+      rfOK = false;
+      if( (ct-lastBlink)>=1000L)
+      {
+         // pas de reception dans les 200 dernières secondes : led clignotante
+         digitalWrite(pin13_led, stateLed = (stateLed+1)%2);
+         lastBlink = ct;
+      }
+   }
+   readOneWire(ct);
+   delay(1);
 }
 
 void sendRelayState(char relayId)
@@ -111,9 +132,19 @@ void setRelayState(char relayId, char onOff )
    if(1<=relayId && relayId<=8)
    {
       if(onOff==1)
+      {
          digitalWrite(pin05_12_relay[relayId-1], LOW);
-      else
+      }
+      else if(onOff==2)
+      {
          digitalWrite(pin05_12_relay[relayId-1], HIGH);
+         delay(100);
+         digitalWrite(pin05_12_relay[relayId-1], LOW);
+      }
+      else
+      {
+         digitalWrite(pin05_12_relay[relayId-1], HIGH);
+      }
       sendRelayState(relayId);
    }
    else
@@ -122,126 +153,145 @@ void setRelayState(char relayId, char onOff )
    }
 }
 
-void readOneWire(void)
+void readOneWire(long ct)
 {
+   //Serial.print("readOneWire(");
+   //Serial.print(ct,10);
+   //Serial.print(",");
+   //Serial.print(ReadOneWireNextStateTime,10);
+   //Serial.println(")");   
    byte i;
-   byte present = 0;
-   byte type_s;
-   byte data[12];
-   byte addr[8];
-   float celsius;
-   Serial.println("readOneWire()");
-   if ( !ds.search(addr))
+   switch(readOneWireState)
    {
-      Serial.println("  No more addresses.");
-      Serial.println();
-      ds.reset_search();
-      delay(250);
-      return;
-   }
-
-   Serial.print("  ROM =");
-   for( i = 0; i < 8; i++)
-   {
-      Serial.write(' ');
-      Serial.print(addr[i], HEX);
-   }
-
-   if (OneWire::crc8(addr, 7) != addr[7])
-   {
-      Serial.println("CRC is not valid!");
-      return;
-   }
-   Serial.println();
-
-   // the first ROM byte indicates which chip
-   switch (addr[0])
-   {
-      case 0x10:
-         Serial.println("  Chip = DS18S20");  // or old DS1820
-         type_s = 1;
-      break;
-      case 0x28:
-         Serial.println("  Chip = DS18B20");
-         type_s = 0;
-      break;
-      case 0x22:
-         Serial.println("  Chip = DS1822");
-         type_s = 0;
-      break;
-      default:
-         Serial.println("Device is not a DS18x20 family device.");
-      return;
-   }
-
-   ds.reset();
-   ds.select(addr);
-   ds.write(0x44, 1);        // start conversion, with parasite power on at the end
-
-   delay(1000);     // maybe 750ms is enough, maybe not
-   // we might do a ds.depower() here, but the reset will take care of it.
-
-   present = ds.reset();
-   ds.select(addr);
-   ds.write(0xBE);         // Read Scratchpad
-
-   Serial.print("  Data = ");
-   Serial.print(present, HEX);
-   Serial.print(" ");
-   for ( i = 0; i < 9; i++)
-   {           // we need 9 bytes
-      data[i] = ds.read();
-      Serial.print(data[i], HEX);
-      Serial.print(" ");
-   }
-   Serial.print(" CRC=");
-   Serial.print(OneWire::crc8(data, 8), HEX);
-   Serial.println();
-
-   // Convert the data to actual temperature
-   // because the result is a 16 bit signed integer, it should
-   // be stored to an "int16_t" type, which is always 16 bits
-   // even when compiled on a 32 bit processor.
-   int16_t raw = (data[1] << 8) | data[0];
-   if (type_s)
-   {
-      raw = raw << 3; // 9 bit resolution default
-      if (data[7] == 0x10)
+      case ROWS_Idle:
       {
-         // "count remain" gives full 12 bit resolution
-         raw = (raw & 0xFFF0) + 12 - data[6];
-      }
-   }
-   else
-   {
-      byte cfg = (data[4] & 0x60);
-      // at lower res, the low bits are undefined, so let's zero them
-      if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
-      else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
-      else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
-      //// default is 12 bit resolution, 750 ms conversion time
-   }
-   celsius = (float)raw / 16.0;
-   Serial.print("  Temperature = ");
-   Serial.print(celsius);
-   Serial.println("°C");
-   Serial.println();
+         if(ct>=ReadOneWireNextStateTime)
+         {
+            Serial.println("readOneWire() - Search Device");
+            if ( !ds.search(ReadOneWireAddr))
+            {
+               Serial.println("  No more addresses.");
+               Serial.println();
+               ds.reset_search();
+               ReadOneWireNextStateTime = ct + 10000L;
+               return;
+            }
 
-   // mémorise la donnée pour le Raspberrry
-   DATA dataToSend;
-   dataToSend.dataId = (char)DataId_DS18x20;
-   memset(dataToSend.buffer,0,sizeof(dataToSend.buffer));
-   DS18x20_DATA* ds18 = (DS18x20_DATA*)dataToSend.buffer;
-   for( i = 0; i < 8; i++)
-   {
-      ds18->ROM[i] = addr[i];
+            Serial.print("  ROM =");
+            for( i = 0; i < 8; i++)
+            {
+               Serial.write(' ');
+               Serial.print(ReadOneWireAddr[i], HEX);
+            }
+
+            if (OneWire::crc8(ReadOneWireAddr, 7) != ReadOneWireAddr[7])
+            {
+               Serial.println("CRC is not valid!");
+               return;
+            }
+            Serial.println();
+
+            // the first ROM byte indicates which chip
+            switch (ReadOneWireAddr[0])
+            {
+               case 0x10:
+                  Serial.println("  Chip = DS18S20");  // or old DS1820
+                  ReadOneWireType_s = 1;
+               break;
+               case 0x28:
+                  Serial.println("  Chip = DS18B20");
+                  ReadOneWireType_s = 0;
+               break;
+               case 0x22:
+                  Serial.println("  Chip = DS1822");
+                  ReadOneWireType_s = 0;
+               break;
+               default:
+                  Serial.println("Device is not a DS18x20 family device.");
+                  ReadOneWireNextStateTime = ct + 500L;
+                  return;
+            }
+
+            ds.reset();
+            ds.select(ReadOneWireAddr);
+            ds.write(0x44, 1);        // start conversion, with parasite power on at the end
+            ReadOneWireNextStateTime = ct + 850L;
+            readOneWireState = ROWS_WaitConversion;
+         }
+      }
+      break;
+      case ROWS_WaitConversion:
+      {
+         byte present = 0;
+         byte data[12];
+         float celsius;
+
+         present = ds.reset();
+         ds.select(ReadOneWireAddr);
+         ds.write(0xBE);         // Read Scratchpad
+
+         Serial.print("  Data = ");
+         Serial.print(present, HEX);
+         Serial.print(" ");
+         for ( i = 0; i < 9; i++)
+         {  // we need 9 bytes
+            data[i] = ds.read();
+            Serial.print(data[i], HEX);
+            Serial.print(" ");
+         }
+         Serial.print(" CRC=");
+         Serial.print(OneWire::crc8(data, 8), HEX);
+         Serial.println();
+
+         // Convert the data to actual temperature
+         // because the result is a 16 bit signed integer, it should
+         // be stored to an "int16_t" type, which is always 16 bits
+         // even when compiled on a 32 bit processor.
+         int16_t raw = (data[1] << 8) | data[0];
+         if (ReadOneWireType_s)
+         {
+            raw = raw << 3; // 9 bit resolution default
+            if (data[7] == 0x10)
+            {
+               // "count remain" gives full 12 bit resolution
+               raw = (raw & 0xFFF0) + 12 - data[6];
+            }
+         }
+         else
+         {
+            byte cfg = (data[4] & 0x60);
+            // at lower res, the low bits are undefined, so let's zero them
+            if (cfg == 0x00) raw = raw & ~7;  // 9 bit resolution, 93.75 ms
+            else if (cfg == 0x20) raw = raw & ~3; // 10 bit res, 187.5 ms
+            else if (cfg == 0x40) raw = raw & ~1; // 11 bit res, 375 ms
+            //// default is 12 bit resolution, 750 ms conversion time
+         }
+         celsius = (float)raw / 16.0;
+         Serial.print("  Temperature = ");
+         Serial.print(celsius);
+         Serial.println();
+         Serial.println();
+
+         // mémorise la donnée pour le Raspberrry
+         DATA dataToSend;
+         dataToSend.dataId = (char)DataId_DS18x20;
+         memset(dataToSend.buffer,0,sizeof(dataToSend.buffer));
+         DS18x20_DATA* ds18 = (DS18x20_DATA*)dataToSend.buffer;
+         for( i = 0; i < 8; i++)
+         {
+            ds18->ROM[i] = ReadOneWireAddr[i];
+         }
+         for( i = 0; i < 9; i++)
+         {
+            ds18->data[i] = data[i];
+         }
+         ds18->temperature = celsius*100;
+         addData(dataToSend);
+         ReadOneWireNextStateTime = ct + 500L;
+         readOneWireState = ROWS_Idle;
+      }
+      break;
    }
-   for( i = 0; i < 9; i++)
-   {
-      ds18->data[i] = data[i];
-   }
-   ds18->temperature = celsius*100;
-   addData(dataToSend);
 }
 
 /* helper function for the receiveProtocol method */
@@ -252,9 +302,9 @@ static inline unsigned long diff(long A, long B)
 
 void receiveRFProtocol(unsigned int changeCount)
 {
-   Serial.print("receiveRFProtocol(");
-   Serial.print(changeCount);
-   Serial.println(")");
+   //Serial.print("receiveRFProtocol(");
+   //Serial.print(changeCount);
+   //Serial.println(")");
 
    unsigned int start=0;
    unsigned int temperature=0;
@@ -299,8 +349,8 @@ void receiveRFProtocol(unsigned int changeCount)
        else
        {
           sReceivedBits[nbBit]  = 0;
-          Serial.print("  truncated=");
-          Serial.println((char*)sReceivedBits);
+          //Serial.print("  truncated=");
+          //Serial.println((char*)sReceivedBits);
           code = 0;
           nbBit = 0;
        }
@@ -346,30 +396,30 @@ void receiveRFProtocol(unsigned int changeCount)
        memset(data.buffer,0,sizeof(data.buffer));
        WSPT1_DATA* wspt1 = (WSPT1_DATA*)data.buffer;
        wspt1->start = start;
-       Serial.print("  start=");
-       Serial.println(start,HEX);
+       //Serial.print("  start=");
+       //Serial.println(start,HEX);
        wspt1->temperature = temperature-500;
        wspt1->checksum = checksum;
-       Serial.print("  checksum=");
-       Serial.println(checksum,HEX);
+       //Serial.print("  checksum=");
+       //Serial.println(checksum,HEX);
        wspt1->id = objectid;
-       Serial.print("  objectid=");
-       Serial.println(objectid,HEX);
-       Serial.print("  trame=");
-       Serial.println((char*)sReceivedBits);
-       Serial.print("  temperature=");
-       Serial.print((float)wspt1->temperature/10.0);
-       Serial.println("°C");
+       //Serial.print("  objectid=");
+       //Serial.println(objectid,HEX);
+       //Serial.print("  trame=");
+       //Serial.println((char*)sReceivedBits);
+       //Serial.print("  temperature=");
+       //Serial.print((float)wspt1->temperature/10.0);
+       //Serial.println("");
        addData(data);
        lastData = millis();
    }
    else
    {
       sReceivedBits[nbBit]  = 0;
-      Serial.print("  truncated=");
-      Serial.println((char*)sReceivedBits);
+      //Serial.print("  truncated=");
+      //Serial.println((char*)sReceivedBits);
    }
-   Serial.println();
+   //Serial.println();
 }
 
 /**
@@ -416,11 +466,11 @@ void rfSignalChange()
 // pour avoir des données
 void dataRequestFromI2CMaster()
 {
-   Serial.println("dataRequestFromI2CMaster ");
+   //Serial.println("dataRequestFromI2CMaster ");
    DATA data;
    if(readData(data))
    {
-      Serial.print("requestEvent() -> data\n");
+      //Serial.print("requestEvent() -> data\n");
       Wire.write((const unsigned char*)&data, sizeof(DATA));
    }
    else
@@ -433,8 +483,8 @@ void dataRequestFromI2CMaster()
 // this function is registered as an event, see setup()
 void receiveEventFromI2CMaster(int howMany)
 {
-   Serial.print("receiveEventFromI2CMaster ");
-   Serial.println(howMany);         // print the integer
+   //Serial.print("receiveEventFromI2CMaster ");
+   //Serial.println(howMany);         // print the integer
    Wire.read();   // first is always 0
    int state=0; // 0 :wait command, 1: relayCommandArg1, 2: relayCommandArg2
    // relayCommand: 0x34, relayId, on/off(1/0)
