@@ -124,11 +124,11 @@ void sendRelayState(char relayId)
 
 void setRelayState(char relayId, char onOff )
 {
-   Serial.print("setRelayState(");
-   Serial.print(relayId,10);
-   Serial.print(",");
-   Serial.print(onOff,10);
-   Serial.println(")");
+   //Serial.print("setRelayState(");
+   //Serial.print(relayId,10);
+   //Serial.print(",");
+   //Serial.print(onOff,10);
+   //Serial.println(")");
    if(1<=relayId && relayId<=8)
    {
       if(onOff==1)
@@ -149,7 +149,7 @@ void setRelayState(char relayId, char onOff )
    }
    else
    {
-      Serial.println("relay id invalid");
+      //Serial.println("relay id invalid");
    }
 }
 
