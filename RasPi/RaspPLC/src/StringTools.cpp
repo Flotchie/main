@@ -42,3 +42,14 @@ bool ListDir( const std::string& path, std::set<std::string>& files )
    closedir(dir);
    return true;
 }
+
+void Tokenize(const std::string& str, const std::string& sep, std::vector<std::string>& tokens, bool emptyAsToken)
+{
+   std::size_t pos, ppos = 0;
+   while( (pos=str.find(sep,ppos)) != std::string::npos )
+   {
+      tokens.push_back(str.substr(ppos,pos-ppos));
+      ppos = pos + sep.length();
+   }
+   tokens.push_back(str.substr(ppos,str.length()-ppos));
+}

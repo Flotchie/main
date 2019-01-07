@@ -21,13 +21,11 @@
 #include <iomanip>
 #include <ctime>
 
-#include "ini/SimpleIni.h"
 #include "StringTools.h"
 #include "json/json.h"
 #include "main.h"
 using namespace std;
 
-map<string, Data> datas;
 
 string data_path = "/home/pi/data/";
 
@@ -54,38 +52,100 @@ int main()
       return 1;
    }
 
-   CSimpleIniA::TNamesDepend sections;
-   ini.GetAllSections(sections);
-   for(auto& section: sections)
+   VariableManager vm(ini);
+
+   // lecture de toutes les données
+   vm.readData(false);
+
+   TInput<double> tempAir(vm, "tprobe.air");
+   TInput<double> tempEau(vm, "tprobe.eau");
+   TInput<double> tempLocal(vm, "tprobe.local");
+   TVariable<bool> filteringPump(vm, "relay.filteringPump");
+
+   if(!vm.linkVariables())
    {
-      CSimpleIniA::TNamesDepend keys;
-      ini.GetAllKeys(section.pItem, keys);
-      for(auto& key : keys)
-      {
-         const char* pszValue = ini.GetValue(section.pItem,  key.pItem);
-         string name = form("%s.%s", section.pItem, pszValue);
-         datas.insert(make_pair(name,Data(pszValue, section.pItem)));
-      }
+      return 2;
    }
 
-   auto previous = chrono::system_clock::now();
+   //auto previous = chrono::system_clock::now();
    while(true)
    {
       // lecture des informations en entrée
-      for(auto& data:datas)
-      {
-         readData(data.second);
-      }
+      vm.readData(true);
 
       // Gestion de la piscine
-
-      //if(datas["local"].m_value)
+      if(tempLocal.get()<20) filteringPump.set(true);
 
 
       // pause de 100ms
       usleep(100000);
    }
    return 0;
+}
+
+
+VariableManager::VariableManager(CSimpleIniA& ini)
+{
+   CSimpleIniA::TNamesDepend variableKeys;
+   ini.GetAllKeys("variables", variableKeys);
+   for(auto& key : variableKeys)
+   {
+      const char* value = ini.GetValue("variables",  key.pItem);
+      vector<string> infos;
+      Tokenize(value,",",infos);
+      string sType = infos[0];
+      bool input = false;
+      if(infos.size()>1)
+      {
+         if(infos[1]=="input") input = true;
+      }
+      if(sType=="bool")
+      {
+         m_datas.insert(make_pair(key.pItem, new TData<bool>(key.pItem, Data::DT_BOOL, input)));
+      }
+      else if(sType=="float")
+      {
+         m_datas.insert(make_pair(key.pItem, new TData<double>(key.pItem, Data::DT_FLOAT, input)));
+      }
+      else
+      {
+         printf("ERROR - invalid type[%s]", sType.c_str());
+      }
+   }
+}
+
+void VariableManager::addVariable(Variable* variable)
+{
+   m_variables.push_back(variable);
+}
+
+
+bool VariableManager::linkVariables()
+{
+   bool res = true;
+   for(auto& variable: m_variables)
+   {
+      map<string, Data*>::iterator it = m_datas.find(variable->m_name);
+      if(it==m_datas.end())
+      {
+         printf("ERROR - variable[%s] undefined", variable->m_name.c_str());
+         res = false;
+      }
+      else
+      {
+         res &= variable->link(*(*it).second);
+      }
+   }
+   return res;
+}
+
+
+void VariableManager::readData(bool inputOnly)
+{
+   for(auto& data:m_datas)
+   {
+      if(data.second->m_input || !inputOnly) readData(*data.second);
+   }
 }
 
 /**
@@ -96,9 +156,9 @@ int main()
  *    "value": 19.2
  * }
  */
-bool readData(Data& data)
+bool VariableManager::readData(Data& data)
 {
-   string path = form("%s%s/%s", data_path.c_str(), data.m_type.c_str(), data.m_name.c_str());
+   string path = form("%s%s", data_path.c_str(), data.m_dir.c_str());
    FILE* fp = fopen(path.c_str(), "rb");
    if(fp!=NULL)
    {
@@ -114,7 +174,10 @@ bool readData(Data& data)
       Json::Value root;
       reader.parse(json,root,false);
       data.m_date = root["date"].asString();
-      data.m_value = root["value"].asString();
+      if(data.m_type==Data::DT_BOOL)
+         dynamic_cast<TData<bool>&>(data).m_value = root["value"].asBool();
+      else if(data.m_type==Data::DT_FLOAT)
+         dynamic_cast<TData<double>&>(data).m_value = root["value"].asDouble();
    }
    else
    {
@@ -122,3 +185,83 @@ bool readData(Data& data)
    }
    return true;
 }
+
+bool VariableManager::setData(Data& data)
+{
+   auto now = chrono::system_clock::now();
+   string path = form("%s%s", data_path.c_str(), data.m_dir.c_str());
+   FILE* fp = fopen(path.c_str(), "wb");
+   if(fp!=NULL)
+   {
+      time_t tt = chrono::system_clock::to_time_t(now);
+      char date[40];
+      strftime(date, 20, "%Y-%m-%d %H:%M:%S", localtime(&tt));
+      fputs("{\n",fp);
+      fputs(form("\"name\": \"%s\",\n", data.m_shortName.c_str()).c_str(),fp);
+      fputs(form("\"date\": \"%s\",\n", date).c_str(),fp);
+      if(data.m_type==Data::DT_BOOL)
+         fputs(form("\"value\": %s\n", dynamic_cast<TData<bool>&>(data).m_value?"true":"false").c_str(),fp);
+      else if(data.m_type==Data::DT_FLOAT)
+         fputs(form("\"value\": %.1f\n", dynamic_cast<TData<double>&>(data).m_value).c_str(),fp);
+      fputs("}\n",fp);
+      fclose(fp);
+   }
+   else
+   {
+      return false;
+   }
+   return true;
+}
+
+Variable::Variable(VariableManager& vm, const std::string& name)
+: m_name(name)
+, m_owner(vm)
+{
+   vm.addVariable(this);
+}
+
+void Variable::set(Data& data)
+{
+   m_owner.setData(data);
+}
+
+template<class T> bool TVariableBase<T>::link(Data& data)
+{
+   m_data = &dynamic_cast<TData<T>&>(data);
+   if(m_data==nullptr)
+   {
+      printf("ERROR - variable[%s] bad type", m_name.c_str());
+      return false;
+   }
+   return true;
+}
+
+template<class T> void TVariable<T>::set(T value)
+{
+   if(TVariableBase<T>::m_data->m_value != value)
+   {
+      TVariableBase<T>::m_data->m_value = value;
+      Variable::set(*TVariableBase<T>::m_data);
+   }
+}
+
+template<class T> bool TVariable<T>::link(Data& data)
+{
+   if(data.isInput())
+   {
+      printf("ERROR - variable[%s] : data is only input, instanciate TInput instead", Variable::m_name.c_str());
+      return false;
+   }
+   return TVariableBase<T>::link(data);
+}
+
+template<class T> bool TInput<T>::link(Data& data)
+{
+   if(!data.isInput())
+   {
+      printf("ERROR - variable[%s] : data is not input only, instanciate TVariable instead", Variable::m_name.c_str());
+      return false;
+   }
+   return TVariableBase<T>::link(data);
+}
+
