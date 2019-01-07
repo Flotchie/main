@@ -1,1 +1,0 @@
-set sysroot C:\rpi-eclipse\rpi-cross-toolchain\arm-linux-gnueabihf

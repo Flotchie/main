@@ -42,6 +42,7 @@ void SPIClass::begin(uint16_t divider, uint8_t bitOrder, uint8_t dataMode)
 
   //Set CS pins polarity to low
   bcm2835_spi_setChipSelectPolarity(BCM2835_SPI_CS0, 0);
+  bcm2835_spi_setChipSelectPolarity(BCM2835_SPI_CS1, 0);
 
   bcm2835_spi_begin();
 
@@ -75,12 +76,19 @@ void SPIClass::setClockDivider(uint16_t rate)
 
 byte SPIClass::transfer(byte _data)
 {
-  //Set which CS pin to use for next transfers
-  bcm2835_spi_chipSelect(BCM2835_SPI_CS0);
   //Transfer 1 byte
   byte data;
   data = bcm2835_spi_transfer((uint8_t)_data);
   return data;
+}
+
+void SPIClass::chipSelect(uint8_t pinCS)
+{
+   uint8_t cs = 0;
+   if(pinCS==8) cs = 0;
+   else if(pinCS==7) cs = 1;
+  //Set which CS pin to use for next transfers
+  bcm2835_spi_chipSelect(cs);
 }
 
 void pinMode(unsigned char pin, unsigned char mode)

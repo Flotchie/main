@@ -34,6 +34,7 @@ uint8_t RHNRFSPIDriver::spiCommand(uint8_t command)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(command);
     digitalWrite(_slaveSelectPin, HIGH);
     _spi.endTransaction();
@@ -47,6 +48,7 @@ uint8_t RHNRFSPIDriver::spiRead(uint8_t reg)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     _spi.transfer(reg); // Send the address, discard the status
     val = _spi.transfer(0); // The written value is ignored, reg value is read
     digitalWrite(_slaveSelectPin, HIGH);
@@ -61,6 +63,7 @@ uint8_t RHNRFSPIDriver::spiWrite(uint8_t reg, uint8_t val)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(reg); // Send the address
     _spi.transfer(val); // New value follows
 #if (RH_PLATFORM == RH_PLATFORM_ARDUINO) && defined(__arm__) && defined(CORE_TEENSY)
@@ -81,6 +84,7 @@ uint8_t RHNRFSPIDriver::spiBurstRead(uint8_t reg, uint8_t* dest, uint8_t len)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(reg); // Send the start address
     while (len--)
 	*dest++ = _spi.transfer(0);
@@ -96,6 +100,7 @@ uint8_t RHNRFSPIDriver::spiBurstWrite(uint8_t reg, const uint8_t* src, uint8_t l
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(reg); // Send the start address
     while (len--)
 	_spi.transfer(*src++);

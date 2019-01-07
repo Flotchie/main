@@ -10,16 +10,17 @@
 //               -
 //============================================================================
 
+#include "main.h"
+
 #include "RH_RF69.h"
+#include "RHHardwareSPI.h"
 #include "bcm2835.h"
 #include <iostream>
 #include <unistd.h>
-#include <string>
 #include <map>
 #include <vector>
 #include <set>
 #include <stdio.h>
-#include <chrono>
 #include <iomanip>
 #include <ctime>
 
@@ -30,10 +31,40 @@ using namespace std;
 string ini_file = "/home/pi/remote-debugging/RaspIO.ini";
 string tprobe_path = "/home/pi/data/tprobe/";
 string w1_devices_path = "/sys/bus/w1/devices/";
-uint8_t slaveSelectPin = SS;
-uint8_t interruptPin = 5;
 
-bool writeProbe(const std::string& probe, const std::chrono::system_clock::time_point& now, double temperature);
+uint8_t rf69InterruptPin   =  5; // RF69 interrupt
+uint8_t OLEDResetPin       =  6; // OLED RESET
+uint8_t OLEDSPIChipSelect  =  7; // SPI CS1
+uint8_t rf69SlaveSelectPin =  8; // SPI CS0
+uint8_t SPI_MISO           =  9; // SPI MISO
+uint8_t SPI_MOSI           = 10; // SPI MOSI
+uint8_t SPI_SCLK           = 11; // SPI SCLK
+uint8_t OLEDSPIDataCommand = 13; // OLED DC
+
+#define DELTAY 2
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define LOGO16_GLCD_HEIGHT 16
+#define LOGO16_GLCD_WIDTH  16
+static unsigned char logo16_glcd_bmp[] =
+{ 0b00000000, 0b11000000,
+  0b00000001, 0b11000000,
+  0b00000001, 0b11000000,
+  0b00000011, 0b11100000,
+  0b11110011, 0b11100000,
+  0b11111110, 0b11111000,
+  0b01111110, 0b11111111,
+  0b00110011, 0b10011111,
+  0b00011111, 0b11111100,
+  0b00001101, 0b01110000,
+  0b00011011, 0b10100000,
+  0b00111111, 0b11100000,
+  0b00111111, 0b11110000,
+  0b01111100, 0b11110000,
+  0b01110000, 0b01110000,
+  0b00000000, 0b00110000 };
+
 
 int main()
 {
@@ -72,24 +103,41 @@ int main()
 	if(bcm2835_init()!=1)
 	{
 	   Serial.println("bcm2835_init failed");
-	   return 1;
+	   return 2;
 	}
-	RH_RF69 rf69(slaveSelectPin, interruptPin);
+
+	RHHardwareSPI hardware_spi(RHGenericSPI::Frequency1MHz, RHGenericSPI::BitOrderMSBFirst, RHGenericSPI::DataMode0);
+
+	hardware_spi.begin();
+
+	// Initialisation afficheur
+	ArduiPi_OLED display(hardware_spi);
+   if ( !display.init(OLEDSPIDataCommand, OLEDResetPin, OLEDSPIChipSelect
+         , OLED_ADAFRUIT_SPI_128x64) )
+   {
+      Serial.println("OLED::init() failed");
+      return 3;
+   }
+   display.drawBitmap(30, 16,  logo16_glcd_bmp, 16, 16, 1);
+   display.display();
+
+   // Initialisation RFM69HW
+	RH_RF69 rf69(rf69SlaveSelectPin, rf69InterruptPin, hardware_spi);
    if (!rf69.init())
    {
 	    Serial.println("rf69::init() failed");
-	    return 2;
+	    return 4;
    }
-
    if (!rf69.setFrequency(868.0))
    {
       Serial.println("setFrequency failed");
-      return 3;
+      return 5;
    }
    // The encryption key has to be the same as the one in the client
    uint8_t key[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
                     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
    rf69.setEncryptionKey(key);
+
    uint8_t rf69Buf[RH_RF69_MAX_MESSAGE_LEN];
    auto previous = chrono::system_clock::now();
    while(true)
@@ -200,4 +248,49 @@ bool writeProbe(const std::string& probe, const std::chrono::system_clock::time_
       return false;
    }
    return true;
+}
+
+
+void testdrawbitmap(ArduiPi_OLED& display, const uint8_t *bitmap, uint8_t w, uint8_t h)
+{
+   uint8_t icons[NUMFLAKES][3];
+   srandom(666);     // whatever seed
+
+   // initialize
+   for (uint8_t f=0; f< NUMFLAKES; f++)
+   {
+      icons[f][XPOS] = random() % display.width();
+      icons[f][YPOS] = 0;
+      icons[f][DELTAY] = random() % 5 + 1;
+
+      printf("x: %d", icons[f][XPOS]);
+      printf("y: %d", icons[f][YPOS]);
+      printf("dy: %d\n", icons[f][DELTAY]);
+   }
+
+   while (1)
+   {
+      // draw each icon
+      for (uint8_t f=0; f< NUMFLAKES; f++)
+      {
+         display.drawBitmap(icons[f][XPOS], icons[f][YPOS], logo16_glcd_bmp, w, h, WHITE);
+      }
+      display.display();
+      usleep(100000);
+
+      // then erase it + move it
+      for (uint8_t f=0; f< NUMFLAKES; f++)
+      {
+         display.drawBitmap(icons[f][XPOS], icons[f][YPOS],  logo16_glcd_bmp, w, h, BLACK);
+         // move it
+         icons[f][YPOS] += icons[f][DELTAY];
+         // if its gone, reinit
+         if (icons[f][YPOS] > display.height())
+         {
+            icons[f][XPOS] = random() % display.width();
+            icons[f][YPOS] = 0;
+            icons[f][DELTAY] = random() % 5 + 1;
+         }
+      }
+   }
 }

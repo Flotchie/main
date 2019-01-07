@@ -33,6 +33,7 @@ typedef unsigned char byte;
 class SPIClass
 {
   public:
+    static void chipSelect(uint8_t pinCS);
     static byte transfer(byte _data);
     // SPI Configuration methods
     static void begin(); // Default

@@ -38,7 +38,13 @@ RHHardwareSPI::RHHardwareSPI(Frequency frequency, BitOrder bitOrder, DataMode da
 {
 }
 
-uint8_t RHHardwareSPI::transfer(uint8_t data) 
+
+void RHHardwareSPI::chipSelect(uint8_t cs)
+{
+   SPI.chipSelect(cs);
+}
+
+uint8_t RHHardwareSPI::transfer(uint8_t data)
 {
     return SPI.transfer(data);
 }

@@ -14,10 +14,6 @@ RHSPIDriver::RHSPIDriver(uint8_t slaveSelectPin, RHGenericSPI& spi)
 
 bool RHSPIDriver::init()
 {
-    // start the SPI library with the default speeds etc:
-    // On Arduino Due this defaults to SPI1 on the central group of 6 SPI pins
-    _spi.begin();
-
     // Initialise the slave select pin
     // On Maple, this must be _after_ spi.begin
     pinMode(_slaveSelectPin, OUTPUT);
@@ -32,6 +28,7 @@ uint8_t RHSPIDriver::spiRead(uint8_t reg)
     uint8_t val;
     ATOMIC_BLOCK_START;
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     _spi.transfer(reg & ~RH_SPI_WRITE_MASK); // Send the address with the write mask off
     val = _spi.transfer(0); // The written value is ignored, reg value is read
     digitalWrite(_slaveSelectPin, HIGH);
@@ -45,6 +42,7 @@ uint8_t RHSPIDriver::spiWrite(uint8_t reg, uint8_t val)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(reg | RH_SPI_WRITE_MASK); // Send the address with the write mask on
     _spi.transfer(val); // New value follows
     digitalWrite(_slaveSelectPin, HIGH);
@@ -59,6 +57,7 @@ uint8_t RHSPIDriver::spiBurstRead(uint8_t reg, uint8_t* dest, uint8_t len)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(reg & ~RH_SPI_WRITE_MASK); // Send the start address with the write mask off
     while (len--)
 	*dest++ = _spi.transfer(0);
@@ -74,6 +73,7 @@ uint8_t RHSPIDriver::spiBurstWrite(uint8_t reg, const uint8_t* src, uint8_t len)
     ATOMIC_BLOCK_START;
     _spi.beginTransaction();
     digitalWrite(_slaveSelectPin, LOW);
+    _spi.chipSelect(_slaveSelectPin);
     status = _spi.transfer(reg | RH_SPI_WRITE_MASK); // Send the start address with the write mask on
     while (len--)
 	_spi.transfer(*src++);
