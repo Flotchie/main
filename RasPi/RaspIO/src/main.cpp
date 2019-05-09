@@ -123,7 +123,7 @@ int main()
 
    // Initialisation RFM69HW
 	RH_RF69 rf69(rf69SlaveSelectPin, rf69InterruptPin, hardware_spi);
-   if (!rf69.init())
+   /*if (!rf69.init())
    {
 	    Serial.println("rf69::init() failed");
 	    return 4;
@@ -137,14 +137,15 @@ int main()
    uint8_t key[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
                     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
    rf69.setEncryptionKey(key);
-
    uint8_t rf69Buf[RH_RF69_MAX_MESSAGE_LEN];
+   */
+
    auto previous = chrono::system_clock::now();
    while(true)
    {
       auto now = chrono::system_clock::now();
 
-      // RF69 : température eau piscine
+      /*// RF69 : température eau piscine
       rf69.checkForReception();
       if (rf69.available())
       {
@@ -170,7 +171,7 @@ int main()
         {
            Serial.println("recv failed");
         }
-      }
+      }*/
       if( chrono::duration_cast<std::chrono::seconds>(now-previous).count()>=60)
       {
          // DS18B20 : sondes de température locales

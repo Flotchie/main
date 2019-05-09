@@ -40,15 +40,15 @@ int main()
        exit(1);
    }
    exe[ret] = 0;
-   string ini_file = form("%s.ini", exe);
+   string data_ini_file = form("%sdata.ini", Data_path.c_str());
 
 	map<string,string> ds18b20s;
 
    CSimpleIniA ini(true, true, true);
    ini.Reset();
-   if (ini.LoadFile(ini_file.c_str()) < 0)
+   if (ini.LoadFile(data_ini_file.c_str()) < 0)
    {
-      fprintf(stderr,"cannot open ini file %s\n", ini_file.c_str());
+      fprintf(stderr,"cannot open ini file %s\n", data_ini_file.c_str());
       return 1;
    }
 

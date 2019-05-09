@@ -1,0 +1,12 @@
+import time
+KNOWN_DEVICES = {}
+COMPATIBILITY = []
+LAST_CLEAR=0
+IGNORE=[]
+KEEPED_CONNECTION={}
+LAST_TIME_EVENT = 0
+SCAN_ERRORS = 0
+SCANNER = ''
+PENDING_ACTION = False
+log_level = "error"
+device='0'
